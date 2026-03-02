@@ -16,13 +16,13 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npm start
    ```
 3. cd backend
-4.   ```bash
+  ```bash
      node index.js
      or nodemon index.js after npm i nodemon
    ```
 
-In the output, you'll find options to open the app in a
+4. In the output, you'll find options to open the app in a
 
-Click s to enter expo mode and scan the barcode
+   Click s to enter expo mode and scan the barcode
 
 
