@@ -1,6 +1,13 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from '../constants/Config';
+
+// Conditionally import notifications to avoid Expo Go errors
+let Notifications: any = null;
+try {
+  Notifications = require('expo-notifications');
+} catch (error) {
+  console.log('Notifications not available');
+}
 
 export type OrderStatus = 'pending' | 'processing' | 'rejected' | 'completed';
 
@@ -17,7 +24,7 @@ export interface Order {
   customerEmail: string;
   customerName: string;
   items: OrderItem[];
-  totalAmount: number;
+  total: number;
   status: OrderStatus;
   createdAt: string;
 }
@@ -37,64 +44,129 @@ interface OrderContextType {
 
 const OrderContext = createContext<OrderContextType | undefined>(undefined);
 
-// Helper to get auth token from stored user data
-const getAuthToken = async (): Promise<string | null> => {
+// Configure notification handler only if notifications are available
+if (Notifications) {
   try {
-    const userData = await AsyncStorage.getItem('user');
-    if (userData) {
-      const user = JSON.parse(userData);
-      return user.token || null;
-    }
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
   } catch (error) {
-    console.error('Error getting auth token:', error);
+    // Ignore - notifications may not be available in Expo Go
   }
-  return null;
-};
-
-// Helper to get user type
-const getUserType = async (): Promise<string | null> => {
-  try {
-    const userData = await AsyncStorage.getItem('user');
-    if (userData) {
-      const user = JSON.parse(userData);
-      return user.role || user.userType || null;
-    }
-  } catch (error) {
-    console.error('Error getting user type:', error);
-  }
-  return null;
-};
+}
 
 export function OrderProvider({ children }: { children: ReactNode }) {
   const [orders, setOrders] = useState<Order[]>([]);
 
   useEffect(() => {
     loadOrders();
+    setupNotificationsForOfficeUsers();
   }, []);
+
+  const setupNotificationsForOfficeUsers = async () => {
+    // Request permissions for both office users and customers
+    // Office users get notifications for new orders
+    // Customers get notifications when orders are completed
+    if (!Notifications) return; // Skip if notifications not available
+    
+    try {
+      // Check if notifications are available (may not work in Expo Go)
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Notification permissions not granted');
+      }
+    } catch (error) {
+      // Silently fail - notifications may not be available in Expo Go
+      // This is okay, the app will still work without notifications
+      console.log('Notifications not available (this is normal in Expo Go)');
+    }
+  };
 
   const loadOrders = async () => {
     try {
-      const token = await getAuthToken();
-      if (!token) return;
-
-      const userType = await getUserType();
-      // Office users see ALL orders, customers see only their own
-      const endpoint = (userType === 'office') ? `${API_URL}/orders/all` : `${API_URL}/orders/my-orders`;
-
-      const response = await fetch(endpoint, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setOrders(data);
-      } else {
-        console.error('Failed to load orders:', response.status);
+      const ordersData = await AsyncStorage.getItem('orders');
+      if (ordersData) {
+        setOrders(JSON.parse(ordersData));
       }
     } catch (error) {
       console.error('Error loading orders:', error);
+    }
+  };
+
+  const saveOrders = async (newOrders: Order[]) => {
+    try {
+      await AsyncStorage.setItem('orders', JSON.stringify(newOrders));
+      setOrders(newOrders);
+    } catch (error) {
+      console.error('Error saving orders:', error);
+    }
+  };
+
+  const sendNotificationToOfficeUsers = async (title: string, body: string) => {
+    if (!Notifications) return; // Skip if notifications not available
+    
+    try {
+      // Check if current logged-in user is an office user
+      // Only send notifications to office users
+      const userData = await AsyncStorage.getItem('user');
+      if (userData) {
+        const user = JSON.parse(userData);
+        // Only send notification if current user is office user
+        if (user.userType === 'office') {
+          try {
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title,
+                body,
+                sound: true,
+              },
+              trigger: null, // Show immediately
+            });
+          } catch (notifError) {
+            // Notifications may not work in Expo Go - that's okay
+            console.log('Notification not sent (may not be available in Expo Go)');
+          }
+        }
+      }
+    } catch (error) {
+      // Silently fail - notifications are optional
+      console.log('Notification not available');
+    }
+  };
+
+  const sendNotificationToCustomer = async (customerEmail: string, title: string, body: string) => {
+    if (!Notifications) return; // Skip if notifications not available
+    
+    try {
+      // Check if current logged-in user is the customer
+      const userData = await AsyncStorage.getItem('user');
+      if (userData) {
+        const user = JSON.parse(userData);
+        // Only send notification if current user is the customer
+        if (user.userType === 'customer' && user.email === customerEmail) {
+          try {
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title,
+                body,
+                sound: true,
+              },
+              trigger: null, // Show immediately
+            });
+          } catch (notifError) {
+            // Notifications may not work in Expo Go - that's okay
+            console.log('Notification not sent (may not be available in Expo Go)');
+          }
+        }
+      }
+    } catch (error) {
+      // Silently fail - notifications are optional
+      console.log('Notification not available');
     }
   };
 
@@ -104,69 +176,78 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     items: OrderItem[],
     total: number
   ): Promise<string> => {
-    const token = await getAuthToken();
-    if (!token) throw new Error('Not authenticated');
+    const newOrder: Order = {
+      id: Date.now().toString(),
+      customerEmail,
+      customerName,
+      items,
+      total,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
 
-    const response = await fetch(`${API_URL}/orders`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({ customerEmail, customerName, items, totalAmount: total }),
-    });
+    const updatedOrders = [newOrder, ...orders];
+    await saveOrders(updatedOrders);
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || 'Failed to create order');
-    }
+    // Send notification only to office users
+    await sendNotificationToOfficeUsers(
+      'New Order Received!',
+      `${customerName} placed an order of ₹${total}`
+    );
 
-    const newOrder: Order = await response.json();
-    setOrders((prev) => [newOrder, ...prev]);
     return newOrder.id;
   };
 
-  const updateStatus = async (orderId: string, status: OrderStatus) => {
-    const token = await getAuthToken();
-    if (!token) throw new Error('Not authenticated');
-
-    const response = await fetch(`${API_URL}/orders/${orderId}/status`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({ status }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || 'Failed to update order');
-    }
-
-    const updatedOrder: Order = await response.json();
-    setOrders((prev) =>
-      prev.map((order) => (order.id === orderId ? { ...updatedOrder, id: updatedOrder.id } : order))
-    );
-  };
-
   const acceptOrder = async (orderId: string) => {
-    await updateStatus(orderId, 'processing');
-  };
-
-  const rejectOrder = async (orderId: string) => {
-    await updateStatus(orderId, 'rejected');
+    // Reload orders from storage to ensure we have the latest data
+    const ordersData = await AsyncStorage.getItem('orders');
+    const currentOrders: Order[] = ordersData ? JSON.parse(ordersData) : [];
+    
+    const updatedOrders = currentOrders.map((order) =>
+      order.id === orderId ? { ...order, status: 'processing' as OrderStatus } : order
+    );
+    await saveOrders(updatedOrders);
   };
 
   const completeOrder = async (orderId: string) => {
-    await updateStatus(orderId, 'completed');
+    // Reload orders from storage to ensure we have the latest data
+    const ordersData = await AsyncStorage.getItem('orders');
+    const currentOrders: Order[] = ordersData ? JSON.parse(ordersData) : [];
+    
+    const order = currentOrders.find((o) => o.id === orderId);
+    if (!order) return;
+
+    const updatedOrders = currentOrders.map((o) =>
+      o.id === orderId ? { ...o, status: 'completed' as OrderStatus } : o
+    );
+    await saveOrders(updatedOrders);
+
+    // Notify customer that order is completed
+    await sendNotificationToCustomer(
+      order.customerEmail,
+      'Order Completed! 🎉',
+      `Your order of ₹${order.total} has been completed and is ready!`
+    );
+  };
+
+  const rejectOrder = async (orderId: string) => {
+    // Reload orders from storage to ensure we have the latest data
+    const ordersData = await AsyncStorage.getItem('orders');
+    const currentOrders: Order[] = ordersData ? JSON.parse(ordersData) : [];
+    
+    const updatedOrders = currentOrders.map((order) =>
+      order.id === orderId ? { ...order, status: 'rejected' as OrderStatus } : order
+    );
+    await saveOrders(updatedOrders);
   };
 
   const getPendingOrders = () => {
+    // Read from state, but also ensure we have latest data
     return orders.filter((order) => order.status === 'pending');
   };
 
   const getProcessingOrders = () => {
+    // Read from state, but also ensure we have latest data
     return orders.filter((order) => order.status === 'processing');
   };
 
@@ -178,6 +259,7 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     return orders.filter((order) => order.customerEmail === customerEmail);
   };
 
+  // Add a method to force refresh orders from storage
   const refreshOrders = async () => {
     await loadOrders();
   };

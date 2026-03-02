@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from '../constants/Config';
 
 export type UserType = 'customer' | 'office';
 
@@ -26,8 +25,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    initializeDefaultUsers();
     loadUser();
   }, []);
+
+  const initializeDefaultUsers = async () => {
+    try {
+      const usersData = await AsyncStorage.getItem('users');
+      if (!usersData) {
+        // Create default test users if no users exist
+        const defaultUsers: User[] = [
+          {
+            email: 'customer@test.com',
+            password: 'customer123',
+            userType: 'customer',
+            name: 'Test Customer',
+          },
+          {
+            email: 'office@test.com',
+            password: 'office123',
+            userType: 'office',
+            name: 'Test Office',
+          },
+        ];
+        await AsyncStorage.setItem('users', JSON.stringify(defaultUsers));
+      }
+    } catch (error) {
+      console.error('Error initializing default users:', error);
+    }
+  };
 
   const loadUser = async () => {
     try {
@@ -44,17 +70,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
-      const response = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setUser(data.user);
-        await AsyncStorage.setItem('user', JSON.stringify(data.user));
+      const usersData = await AsyncStorage.getItem('users');
+      if (!usersData) {
+        return false;
+      }
+
+      const users: User[] = JSON.parse(usersData);
+      const foundUser = users.find(
+        (u) => u.email === email && u.password === password
+      );
+
+      if (foundUser) {
+        setUser(foundUser);
+        await AsyncStorage.setItem('user', JSON.stringify(foundUser));
         return true;
       }
+
       return false;
     } catch (error) {
       console.error('Error during login:', error);
@@ -69,18 +100,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     name?: string
   ): Promise<boolean> => {
     try {
-      const response = await fetch(`${API_URL}/auth/signup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, userType, name }),
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setUser(data.user);
-        await AsyncStorage.setItem('user', JSON.stringify(data.user));
-        return true;
+      const usersData = await AsyncStorage.getItem('users');
+      const users: User[] = usersData ? JSON.parse(usersData) : [];
+
+      // Check if user already exists
+      if (users.some((u) => u.email === email)) {
+        return false;
       }
-      return false;
+
+      const newUser: User = {
+        email,
+        password,
+        userType,
+        name,
+      };
+
+      users.push(newUser);
+      await AsyncStorage.setItem('users', JSON.stringify(users));
+      setUser(newUser);
+      await AsyncStorage.setItem('user', JSON.stringify(newUser));
+      return true;
     } catch (error) {
       console.error('Error during signup:', error);
       return false;

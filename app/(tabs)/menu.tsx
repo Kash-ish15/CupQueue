@@ -135,6 +135,11 @@ export default function MenuScreen() {
     }));
 
     try {
+      // Save cart data for alert message before clearing
+      const cartItemsForAlert = cart.map((item) => 
+        `${item.item.name} x${item.quantity} - ₹${item.item.price * item.quantity}`
+      ).join('\n');
+
       await createOrder(
         user.email,
         user.name || user.email,
@@ -142,12 +147,13 @@ export default function MenuScreen() {
         total
       );
 
+      // Clear cart immediately after successful order - this resets all quantities to 0
+      setCart([]);
+      
       Alert.alert(
         'Order Placed!',
-        `Your order total is ₹${total}\n\nItems:\n${cart
-          .map((item) => `${item.item.name} x${item.quantity} - ₹${item.item.price * item.quantity}`)
-          .join('\n')}\n\nYour order has been sent to the Ram Bhiya.`,
-        [{ text: 'OK', onPress: () => setCart([]) }]
+        `Your order total is ₹${total}\n\nItems:\n${cartItemsForAlert}\n\nYour order has been sent to the Ram Bhiya.`,
+        [{ text: 'OK' }]
       );
     } catch (error) {
       Alert.alert('Error', 'Failed to place order. Please try again.');

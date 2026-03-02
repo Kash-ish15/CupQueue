@@ -94,8 +94,42 @@ export default function SignupScreen() {
             placeholderTextColor="#999"
           />
 
+          <Text style={styles.label}>Account Type</Text>
+          <View style={styles.radioGroup}>
+            <TouchableOpacity
+              style={[
+                styles.radioButton,
+                userType === 'customer' && styles.radioButtonSelected,
+              ]}
+              onPress={() => setUserType('customer')}
+            >
+              <Text
+                style={[
+                  styles.radioText,
+                  userType === 'customer' && styles.radioTextSelected,
+                ]}
+              >
+                Customer
+              </Text>
+            </TouchableOpacity>
 
-          {/* Account type is always customer for new signups */}
+            <TouchableOpacity
+              style={[
+                styles.radioButton,
+                userType === 'office' && styles.radioButtonSelected,
+              ]}
+              onPress={() => setUserType('office')}
+            >
+              <Text
+                style={[
+                  styles.radioText,
+                  userType === 'office' && styles.radioTextSelected,
+                ]}
+              >
+                Office
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity
             style={styles.button}
