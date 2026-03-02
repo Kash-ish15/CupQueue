@@ -1,13 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// Conditionally import notifications to avoid Expo Go errors
-let Notifications: any = null;
-try {
-  Notifications = require('expo-notifications');
-} catch (error) {
-  console.log('Notifications not available');
-}
+import * as Notifications from 'expo-notifications';
 
 export type OrderStatus = 'pending' | 'processing' | 'rejected' | 'completed';
 
@@ -44,21 +37,16 @@ interface OrderContextType {
 
 const OrderContext = createContext<OrderContextType | undefined>(undefined);
 
-// Configure notification handler only if notifications are available
-if (Notifications) {
-  try {
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-      }),
-    });
-  } catch (error) {
-    // Ignore - notifications may not be available in Expo Go
-  }
-}
+// Configure notification handler for local notifications
+// Note: Remote push notifications don't work in Expo Go, but local notifications do
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 export function OrderProvider({ children }: { children: ReactNode }) {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -72,18 +60,17 @@ export function OrderProvider({ children }: { children: ReactNode }) {
     // Request permissions for both office users and customers
     // Office users get notifications for new orders
     // Customers get notifications when orders are completed
-    if (!Notifications) return; // Skip if notifications not available
-    
+    // Local notifications work in Expo Go (remote push notifications don't)
     try {
-      // Check if notifications are available (may not work in Expo Go)
       const { status } = await Notifications.requestPermissionsAsync();
       if (status !== 'granted') {
         console.log('Notification permissions not granted');
+      } else {
+        console.log('Notification permissions granted - local notifications enabled');
       }
     } catch (error) {
-      // Silently fail - notifications may not be available in Expo Go
-      // This is okay, the app will still work without notifications
-      console.log('Notifications not available (this is normal in Expo Go)');
+      // Silently fail - notifications may not be available
+      console.log('Could not request notification permissions:', error);
     }
   };
 
@@ -108,8 +95,6 @@ export function OrderProvider({ children }: { children: ReactNode }) {
   };
 
   const sendNotificationToOfficeUsers = async (title: string, body: string) => {
-    if (!Notifications) return; // Skip if notifications not available
-    
     try {
       // Check if current logged-in user is an office user
       // Only send notifications to office users
@@ -118,24 +103,20 @@ export function OrderProvider({ children }: { children: ReactNode }) {
         const user = JSON.parse(userData);
         // Only send notification if current user is office user
         if (user.userType === 'office') {
-          try {
-            await Notifications.scheduleNotificationAsync({
-              content: {
-                title,
-                body,
-                sound: true,
-              },
-              trigger: null, // Show immediately
-            });
-          } catch (notifError) {
-            // Notifications may not work in Expo Go - that's okay
-            console.log('Notification not sent (may not be available in Expo Go)');
-          }
+          // Local notifications work in Expo Go
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title,
+              body,
+              sound: true,
+            },
+            trigger: null, // Show immediately (local notification)
+          });
         }
       }
     } catch (error) {
       // Silently fail - notifications are optional
-      console.log('Notification not available');
+      console.log('Could not send notification:', error);
     }
   };
 
